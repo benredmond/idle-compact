@@ -4,7 +4,7 @@ A Claude Code mod that compacts an idle session just before its 1-hour prompt ca
 
 ```
 /plugin marketplace add benredmond/idle-compact
-/plugin install idle-compact@ben-mods
+/plugin install idle-compact@idle-compact
 /reload-plugins
 ```
 
@@ -12,7 +12,7 @@ A Claude Code mod that compacts an idle session just before its 1-hour prompt ca
 - Skips sessions under 40k tokens, running turns, and caches that have already expired.
 - Shows a countdown in the status line.
 
-Configure with `/plugin configure idle-compact@ben-mods` (`ttlMinutes` 60, `marginMinutes` 5, `minContextTokens` 40000, `instructions`).
+Configure with `/plugin configure idle-compact@idle-compact` (`ttlMinutes` 60, `marginMinutes` 5, `minContextTokens` 40000, `instructions`).
 
 Not useful if your prompt cache lasts 5 minutes.
 
