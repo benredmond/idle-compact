@@ -24,12 +24,21 @@ type Config = {
 }
 
 let isCompacting = false
+let isHeadless = false
 let failedAttempts = 0
 const MAX_ATTEMPTS = 3
 const COMPACTED = 'idle-compact: compacted · waits for next turn'
 
 function latch($: EngineInterface, status: string) {
   return update($, idle, s => ({ ...s, compactedSinceLastTurn: true, latchedStatus: status }))
+}
+
+// Headless sessions (-p, the SDK, the desktop app) refuse $.session.compact; there
+// /compact runs as a command instead, and reports no token counts.
+async function compact($: EngineInterface, cfg: Config) {
+  if (!isHeadless) return $.session.compact({ instructions: cfg.instructions })
+  await $.command.run({ command: 'compact', args: cfg.instructions ?? '' })
+  return undefined
 }
 
 // One tick both draws the countdown and, once due, compacts.
@@ -67,8 +76,8 @@ async function tick($: EngineInterface, cfg: Config) {
   isCompacting = true
   $.ui.status('idle-compact: compacting…')
   try {
-    const result = await $.session.compact({ instructions: cfg.instructions })
-    if (result.skip !== undefined) {
+    const result = await compact($, cfg)
+    if (result?.skip !== undefined) {
       // Vetoed by another hook: latch anyway so the veto is not retried every tick.
       const status = `idle-compact: skipped · ${result.skip}`
       await latch($, status)
@@ -77,19 +86,21 @@ async function tick($: EngineInterface, cfg: Config) {
     }
     // Our own compact() skips our session.compact hook, so latch here too.
     await latch($, COMPACTED)
-    const before = result.tokensBefore ?? tokens
-    const after = result.tokensAfter
+    const before = result?.tokensBefore ?? tokens
+    const after = result?.tokensAfter
     $.ui.toast(
       `idle-compact: ${kTokens(before)}${after === undefined ? '' : ` → ${kTokens(after)}`} tokens while cache warm`,
       { timeoutMs: 10_000 },
     )
     $.ui.status(COMPACTED)
-  } catch {
+  } catch (err) {
     // compact() rejects while a turn runs or the summary request fails: retry
     // on the next ticks, then give up for this idle stretch.
     failedAttempts += 1
+    const reason = (err instanceof Error ? err.message : String(err)).replace(/^idle-compact: /, '')
+    $.ui.log(`idle-compact: compact failed (${failedAttempts}/${MAX_ATTEMPTS}): ${reason}`, { to: 'debug' })
     if (failedAttempts >= MAX_ATTEMPTS) {
-      const status = `idle-compact: failed ${failedAttempts}x · waits for next turn`
+      const status = `idle-compact: failed ${failedAttempts}x · ${reason.slice(0, 80)}`
       await latch($, status)
       $.ui.status(status)
     } else {
@@ -111,6 +122,7 @@ export const register: Register = (on, options) => {
   let ticker: Timer | undefined
 
   on('session.start', async ($, e, next) => {
+    isHeadless = !e.isInteractive
     ticker?.cancel()
     ticker = $.clock.every(TICK_MS, () => void tick($, cfg))
     void tick($, cfg)

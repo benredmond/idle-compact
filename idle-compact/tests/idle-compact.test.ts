@@ -5,10 +5,10 @@ import type { Engine } from 'claude-code/testing'
 const MIN = 60_000
 const summary: SessionMessage = { role: 'user', text: 'summary', toolUses: [] }
 
-type World = { failCompact: boolean; compacts: number; statuses: (string | undefined)[]; toasts: string[]; tokens: number }
+type World = { failCompact: boolean; throwCompact: boolean; compacts: number; commands: string[]; statuses: (string | undefined)[]; toasts: string[]; tokens: number }
 
 function world(on: On, tokens = 120_000): World {
-  const w: World = { failCompact: false, compacts: 0, statuses: [], toasts: [], tokens }
+  const w: World = { failCompact: false, throwCompact: false, compacts: 0, commands: [], statuses: [], toasts: [], tokens }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.step', async function* (_$, e) {
@@ -18,6 +18,7 @@ function world(on: On, tokens = 120_000): World {
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: w.tokens, window: 200_000 }, rateLimits: [] } }))
   on('session.compact', () => {
     w.compacts += 1
+    if (w.throwCompact) throw new Error('summary request failed')
     if (w.failCompact) return { skip: 'api down' }
     return { messages: [summary], tokensBefore: w.tokens, tokensAfter: 12_000 }
   })
@@ -25,6 +26,11 @@ function world(on: On, tokens = 120_000): World {
     w.statuses.push(e.text)
     return { value: undefined }
   })
+  on('command.run', (_$, e) => {
+    w.commands.push(`/${e.command} ${e.args}`)
+    return {}
+  })
+  on('ui.log', () => ({ value: undefined }))
   on('ui.toast', (_$, e) => {
     w.toasts.push(e.text)
     return { value: undefined }
@@ -38,8 +44,8 @@ async function runTurn($: Engine, turnId: string, agentId?: string) {
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId, agentId, reason: 'answer' })
 }
 
-async function start($: Engine) {
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+async function start($: Engine, isInteractive = true) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive })
 }
 
 test('compacts once at ttl - margin and never again until a new turn', async ($, on) => {
@@ -130,4 +136,27 @@ test('an auto-compaction mid-turn does not latch the idle stretch after it', asy
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.advance(56 * MIN)
   expect(w.compacts).toBe(2)
+})
+
+test('headless sessions compact through the /compact command, once', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await start($, false)
+  await runTurn($, 't1')
+  await clock.advance(56 * MIN)
+  expect(w.commands).toEqual(['/compact Preserve the current task, open decisions, file paths touched, and next steps.'])
+  expect(w.compacts).toBe(0)
+  expect(w.statuses.at(-1)).toBe('idle-compact: compacted · waits for next turn')
+  await clock.advance(3 * 60 * MIN)
+  expect(w.commands.length).toBe(1)
+})
+
+test('a compaction that keeps failing shows why after three tries', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  w.throwCompact = true
+  await start($)
+  await runTurn($, 't1')
+  await clock.advance(58 * MIN)
+  expect(w.statuses.at(-1)).toMatch(/^idle-compact: failed 3x · .+/)
 })

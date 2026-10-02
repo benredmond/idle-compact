@@ -1,6 +1,6 @@
 {
   "name": "idle-compact",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Compacts an idle session just before its prompt cache expires, so returning does not re-write the full context",
   "author": {
     "name": "Ben Redmond",
