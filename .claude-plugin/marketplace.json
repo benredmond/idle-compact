@@ -1,0 +1,15 @@
+{
+  "name": "ben-mods",
+  "owner": {
+    "name": "Ben Redmond",
+    "url": "https://github.com/benredmond"
+  },
+  "plugins": [
+    {
+      "name": "idle-compact",
+      "source": "./idle-compact",
+      "description": "Compacts an idle session just before its prompt cache expires, so returning does not re-write the full context"
+    }
+  ],
+  "description": "idle-compact: compacts an idle Claude Code session before its prompt cache expires"
+}
