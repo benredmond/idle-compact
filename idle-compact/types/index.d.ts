@@ -1,9 +1,8 @@
 export type IdleCompactState = {
   lastMainRequestAt: number | null
   turnRunning: boolean
-  compactedSinceLastTurn: boolean
-  /** Status shown while latched: why idle-compact is waiting for the next turn. */
-  latchedStatus: string
+  /** Status held once this idle stretch is done (compacted, vetoed, gave up); cleared by the next turn. */
+  latched: string | null
 }
 
 declare module 'claude-code' {

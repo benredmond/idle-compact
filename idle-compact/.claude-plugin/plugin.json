@@ -1,6 +1,6 @@
 {
   "name": "idle-compact",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "Compacts an idle session just before its prompt cache expires, so returning does not re-write the full context",
   "author": {
     "name": "Ben Redmond",
@@ -38,8 +38,8 @@
     "instructions": {
       "type": "string",
       "title": "Compaction instructions",
-      "description": "What the summary should preserve",
-      "default": "Preserve the current task, open decisions, file paths touched, and next steps."
+      "description": "Optional focus for the summary; empty runs a plain /compact",
+      "default": ""
     }
   }
 }

@@ -5,10 +5,19 @@ import type { Engine } from 'claude-code/testing'
 const MIN = 60_000
 const summary: SessionMessage = { role: 'user', text: 'summary', toolUses: [] }
 
-type World = { failCompact: boolean; throwCompact: boolean; compacts: number; commands: string[]; statuses: (string | undefined)[]; toasts: string[]; tokens: number }
+type World = {
+  failCompact: boolean
+  throwCompact: boolean
+  compacts: number
+  instructions: (string | undefined)[]
+  commands: string[]
+  statuses: (string | undefined)[]
+  toasts: string[]
+  tokens: number
+}
 
 function world(on: On, tokens = 120_000): World {
-  const w: World = { failCompact: false, throwCompact: false, compacts: 0, commands: [], statuses: [], toasts: [], tokens }
+  const w: World = { failCompact: false, throwCompact: false, compacts: 0, instructions: [], commands: [], statuses: [], toasts: [], tokens }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.step', async function* (_$, e) {
@@ -16,8 +25,9 @@ function world(on: On, tokens = 120_000): World {
   })
   on('turn.complete', () => ({ text: 'ok' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: w.tokens, window: 200_000 }, rateLimits: [] } }))
-  on('session.compact', () => {
+  on('session.compact', (_$, e) => {
     w.compacts += 1
+    w.instructions.push(e.instructions)
     if (w.throwCompact) throw new Error('summary request failed')
     if (w.failCompact) return { skip: 'api down' }
     return { messages: [summary], tokensBefore: w.tokens, tokensAfter: 12_000 }
@@ -27,7 +37,7 @@ function world(on: On, tokens = 120_000): World {
     return { value: undefined }
   })
   on('command.run', (_$, e) => {
-    w.commands.push(`/${e.command} ${e.args}`)
+    w.commands.push(e.args ? `/${e.command} ${e.args}` : `/${e.command}`)
     return {}
   })
   on('ui.log', () => ({ value: undefined }))
@@ -56,12 +66,13 @@ test('compacts once at ttl - margin and never again until a new turn', async ($,
 
   await clock.advance(54 * MIN)
   expect(w.compacts).toBe(0)
-  expect(w.statuses.at(-1)).toMatch(/^idle-compact in \dm · cache \dm$/)
+  expect(w.statuses.at(-1)).toBe('◕ 1m')
 
   await clock.advance(1.5 * MIN)
   expect(w.compacts).toBe(1)
-  expect(w.toasts.at(-1)).toBe('idle-compact: 120k → 12k tokens while cache warm')
-  expect(w.statuses.at(-1)).toBe('idle-compact: compacted · waits for next turn')
+  expect(w.instructions).toEqual([undefined])
+  expect(w.toasts).toEqual([])
+  expect(w.statuses.at(-1)).toBe('✓ 120k→12k')
 
   await clock.advance(3 * 60 * MIN)
   expect(w.compacts).toBe(1)
@@ -101,7 +112,7 @@ test('skips sessions below the context floor', async ($, on) => {
   await runTurn($, 't1')
   await clock.advance(58 * MIN)
   expect(w.compacts).toBe(0)
-  expect(w.statuses.at(-1)).toBe('idle-compact: off · ctx 20k < 40k')
+  expect(w.statuses.at(-1)).toBeUndefined()
 })
 
 test('subagent requests do not re-anchor the main cache clock', async ($, on) => {
@@ -123,7 +134,7 @@ test('a vetoed compaction latches instead of retrying every tick', async ($, on)
   await runTurn($, 't1')
   await clock.advance(58 * MIN)
   expect(w.compacts).toBe(1)
-  expect(w.statuses.at(-1)).toBe('idle-compact: skipped · api down')
+  expect(w.statuses.at(-1)).toBe('⊘')
 })
 
 test('an auto-compaction mid-turn does not latch the idle stretch after it', async ($, on) => {
@@ -138,25 +149,25 @@ test('an auto-compaction mid-turn does not latch the idle stretch after it', asy
   expect(w.compacts).toBe(2)
 })
 
-test('headless sessions compact through the /compact command, once', async ($, on) => {
+test('headless sessions run a plain /compact, once', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   await start($, false)
   await runTurn($, 't1')
   await clock.advance(56 * MIN)
-  expect(w.commands).toEqual(['/compact Preserve the current task, open decisions, file paths touched, and next steps.'])
+  expect(w.commands).toEqual(['/compact'])
   expect(w.compacts).toBe(0)
-  expect(w.statuses.at(-1)).toBe('idle-compact: compacted · waits for next turn')
+  expect(w.statuses.at(-1)).toBe('✓')
   await clock.advance(3 * 60 * MIN)
   expect(w.commands.length).toBe(1)
 })
 
-test('a compaction that keeps failing shows why after three tries', async ($, on) => {
+test('a compaction that keeps failing gives up after three tries', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   w.throwCompact = true
   await start($)
   await runTurn($, 't1')
   await clock.advance(58 * MIN)
-  expect(w.statuses.at(-1)).toMatch(/^idle-compact: failed 3x · .+/)
+  expect(w.statuses.at(-1)).toBe('✗')
 })
